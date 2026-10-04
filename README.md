@@ -13,9 +13,13 @@ cd carekind/06-app-development/app
 # 或者单独 clone
 git clone git@github.com:Metatree-AI-Lab/carekind-app.git
 
-# 每个 clone 执行一次
+# 在 meta repo 根目录运行（会初始化本 submodule 并启用两个仓库的 pre-commit）
+scripts/setup.sh
+
+# 如果是单独 clone 本仓库：每个 clone 执行一次
 git config core.hooksPath .githooks
 ```
+> 在 meta repo 里如果 `06-app-development/app/` 是空的，说明 submodule 还没安装：在 meta repo 根目录运行 `scripts/setup.sh` 或 `git submodule update --init --recursive`。
 
 ## 结构
 ```
