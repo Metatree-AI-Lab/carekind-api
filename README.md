@@ -2,7 +2,20 @@
 
 Owner: Lin (Tech Lead) · Last reviewed: 04/10/2026
 
-careKind 后端和护士端 App 的代码仓库。**技术栈待 ADR 确定**（`../engineering/adr/`），目前只有架构骨架和各功能模块的文档。
+careKind AI 后端和护士端 App 的代码仓库。作为 submodule 挂在 meta repo [Metatree-AI-Lab/carekind](https://github.com/Metatree-AI-Lab/carekind) 的 `06-app-development/app/`。**技术栈待 ADR 确定**（meta repo `06-app-development/engineering/adr/`），目前只有架构骨架和各功能模块的文档。
+
+## 获取代码
+```bash
+# 推荐：连同 meta repo 一起 clone（能用到完整规则、PRD、skills、法律参考库）
+git clone --recurse-submodules git@github.com:Metatree-AI-Lab/carekind.git
+cd carekind/06-app-development/app
+
+# 或者单独 clone
+git clone git@github.com:Metatree-AI-Lab/carekind-app.git
+
+# 每个 clone 执行一次
+git config core.hooksPath .githooks
+```
 
 ## 结构
 ```
@@ -13,13 +26,16 @@ src/
 	application/     用例编排
 	adapters/        外部系统（语音转写、LLM、声纹、CMS、存储、认证）
 	interfaces/      API 和 App 界面
+scripts/           检查脚本（从 meta repo 同步，不要直接改）
 ```
 
 ## 开始之前
-1. 读 `docs/PRD.md`（产品逻辑 §6、护栏 §9）
-2. 读 `rules/02-code-rules.md`（Tab 缩进 4、16 条核心要求、单文件 ≤ 1000 行）
-3. 执行一次 `git config core.hooksPath .githooks`
-4. 编辑器开启 EditorConfig
+1. 读 meta repo 的 `docs/PRD.md`（产品逻辑 §6、护栏 §9）
+2. 读 meta repo 的 `rules/02-code-rules.md`（Tab 缩进 4、16 条核心要求、单文件 ≤ 1000 行）
+3. 编辑器开启 EditorConfig
 
-## 文档约定
-每个功能模块目录都必须有 `README.md`（给人看）和 `CLAUDE.md`（给 AI 看，含关键函数登记）；`AGENTS.md` 是指向 `CLAUDE.md` 的软链接，供 Codex 读取。
+## 在 meta repo 中更新本仓库
+```bash
+cd 06-app-development/app && git pull          # 拉取 App 仓库最新代码
+cd ../.. && git add 06-app-development/app && git commit -m "chore: bump app submodule"
+```

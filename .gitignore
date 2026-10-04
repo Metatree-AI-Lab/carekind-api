@@ -1,0 +1,10 @@
+# 密钥：只提交 .env.example（代码规范核心要求 03）
+.env
+.env.*
+!.env.example
+
+.DS_Store
+node_modules/
+dist/
+build/
+coverage/

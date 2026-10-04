@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# careKind App pre-commit（检查脚本从 meta repo 同步：scripts/sync-app-tooling.sh）
+#   1. 代码文件 ≤ 1000 行
+#   2. 每层目录都有 README.md + CLAUDE.md + AGENTS.md 软链接
+# 启用方法（每个 clone 执行一次）：git config core.hooksPath .githooks
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+"$ROOT/scripts/check-file-length.sh" --staged
+"$ROOT/scripts/check-context-docs.sh"

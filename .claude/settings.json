@@ -1,0 +1,17 @@
+{
+	"hooks": {
+		"PostToolUse": [
+			{
+				"matcher": "Edit|Write|MultiEdit",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/scripts/check-file-length.sh --hook",
+						"timeout": 10,
+						"statusMessage": "检查文件行数（≤ 1000）"
+					}
+				]
+			}
+		]
+	}
+}
