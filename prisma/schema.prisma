@@ -1,0 +1,972 @@
+// careKind API — 第一阶段（管理端）数据模型。
+// 来源：docs/prds/2026-10-18-super-admin-multi-facility-console.md（SA）、
+//       docs/prds/2026-10-18-provider-portal-facility-admin.md（PP）、ADR-0006。
+// 规则：
+//   - 枚举取值与 @carekind/shared 的 zod 枚举逐字一致（shared 是唯一来源），API 不做名称转换。
+//   - 所有租户数据表都有 providerId 和以 providerId 开头的索引；Postgres RLS 见 prisma/rls.sql。
+//   - Super Admin 没有读住户的接口；住户相关表的 RLS 只允许 PORTAL audience。
+//   - 本文件不包含护士端（数据面）的表：草稿、记录、音频、交接等在第二阶段加入。
+//   - 审计表只追加；审计和日志不存健康信息内容或住户姓名。
+//   - JSON 列（limits、target、config 等）写入前一律用 shared 的 schema 校验。
+
+generator client {
+	provider = "prisma-client-js"
+}
+
+datasource db {
+	provider  = "postgresql"
+	url       = env("DATABASE_URL")
+	directUrl = env("DATABASE_MIGRATION_URL")
+}
+
+// ───────────────────────────── 枚举（与 @carekind/shared 一致） ─────────────────────────────
+
+enum AustralianState {
+	NSW
+	VIC
+	QLD
+	WA
+	SA
+	TAS
+	ACT
+	NT
+}
+
+enum ProviderStatus {
+	Draft
+	Onboarding
+	Active
+	Suspended
+	Terminating
+	Terminated
+	Cancelled
+}
+
+enum FacilityStatus {
+	Onboarding
+	Active
+	Suspended
+	Closed
+}
+
+enum AuthAudience {
+	SUPER_ADMIN
+	PORTAL
+}
+
+enum SuperAdminUserStatus {
+	Active
+	Disabled
+}
+
+enum StaffStatus {
+	Invited
+	Onboarding
+	Active
+	Suspended
+	Deactivated
+}
+
+enum NurseAppRole {
+	PCW
+	EN
+	RN
+	OtherStaff
+}
+
+enum RegistrationType {
+	RN
+	EN
+	None
+}
+
+enum PortalRole {
+	Owner
+	ProviderAdmin
+	FacilityManager
+	ClinicalLead
+	CareManager
+}
+
+enum ResidentStatus {
+	PreAdmission
+	Admitted
+	OnLeave
+	InHospital
+	Departed
+	Deceased
+}
+
+enum AiDocumentationConsent {
+	Pending
+	Informed
+	Consented
+	OptedOut
+}
+
+enum ContactRoleType {
+	RegisteredSupporter
+	SubstituteDecisionMaker
+	FamilyContact
+}
+
+// 位置历史的事件类型；同院调换另记原因类别（RoomChangeReason）
+enum LocationEventKind {
+	Admission
+	RoomChange
+	Transfer
+}
+
+enum RoomChangeReason {
+	ResidentRequest
+	ResidentAgreed
+	AssessedClinicalReason
+	Maintenance
+	Emergency
+}
+
+enum TransferStatus {
+	Blocked
+	AwaitingAcceptance
+	Completed
+	Cancelled
+}
+
+enum TransferReasonCategory {
+	CareNeeds
+	ResidentOrFamilyRequest
+	FacilityCapacity
+	Other
+}
+
+enum RosterBatchStatus {
+	AwaitingDecisions
+	BlockedByConflicts
+	AwaitingSecondConfirmation
+	Applied
+	Reverted
+	Discarded
+}
+
+enum RosterRowStatus {
+	New
+	Update
+	PossibleMatch
+	Conflict
+	Missing
+	NearName
+}
+
+enum RosterRowDecision {
+	Undecided
+	Accept
+	SamePerson
+	DifferentPerson
+	Skip
+}
+
+enum ConfigLayer {
+	Platform
+	Provider
+	Facility
+}
+
+enum ConfigVersionStatus {
+	PendingApproval
+	Scheduled
+	Effective
+	Superseded
+	Rejected
+}
+
+enum EffectiveMode {
+	NextShift
+	Immediate
+}
+
+enum WorkflowItem {
+	ReviewChain
+	EscalationRouting
+	LifecycleChecklist
+	StaffOnboarding
+	FacilityGoLive
+}
+
+enum ContentStatus {
+	Draft
+	PendingApproval
+	Published
+	Deprecated
+	Planned
+}
+
+enum FeatureFlagCategory {
+	Release
+	Risk
+	Operations
+}
+
+enum FeatureFlagScope {
+	Global
+	State
+	Provider
+	Facility
+}
+
+enum BillingStatus {
+	NotInvoiced
+	Invoiced
+	Paid
+	Overdue
+}
+
+enum ComplianceDocumentType {
+	PilotAgreement
+	SuccessCriteria
+	Msa
+	Dpa
+	CarekindPia
+	ProviderPia
+	InsuranceProfessionalIndemnity
+	InsuranceCyber
+	InsurancePublicLiability
+	SecurityQuestionnaire
+	SubprocessorList
+	ClinicalSafetyPack
+}
+
+enum ComplianceStatusValue {
+	NotStarted
+	Drafting
+	Sent
+	Signed
+	Expired
+	NotApplicable
+}
+
+enum BreachRegime {
+	CommonwealthNdb
+	NswPublicSector
+	QldPublicSector
+	VicOvic
+	Other
+}
+
+enum GoLiveItemSource {
+	ContractStatus
+	ProviderSelfReport
+	ProviderPortal
+	SuperAdmin
+}
+
+enum SupportAccessScope {
+	Metadata
+	SingleRecordOrExportJob
+	UnitShiftRecordList
+}
+
+enum SupportAccessStatus {
+	Pending
+	Approved
+	Rejected
+	Active
+	Expired
+	Revoked
+}
+
+// four-eyes：发起人和批准人必须是两个不同的人（SA §4-C）
+enum ApprovalKind {
+	ProviderActivate
+	ProviderSuspend
+	ProviderResume
+	ProviderTerminate
+	FacilityStateChange
+	RulePackPublish
+	TemplatePublish
+	PlatformConfigPublish
+	FeatureFlagGlobalEnable
+}
+
+enum ApprovalStatus {
+	Pending
+	Approved
+	Rejected
+	Withdrawn
+}
+
+enum AuditActorType {
+	SuperAdminUser
+	ProviderStaff
+	SupportSession
+	System
+}
+
+enum AuditOutcome {
+	Succeeded
+	Rejected
+}
+
+// ───────────────────────────── 控制面：careKind 内部 ─────────────────────────────
+
+model SuperAdminUser {
+	id               String                      @id @default(uuid()) @db.Uuid
+	email            String                      @unique
+	displayName      String
+	passwordHash     String
+	status           SuperAdminUserStatus        @default(Active)
+	failedLoginCount Int                         @default(0)
+	lockedUntil      DateTime?
+	lastLoginAt      DateTime?
+	createdAt        DateTime                    @default(now())
+	updatedAt        DateTime                    @updatedAt
+	memberships      SuperAdminGroupMembership[]
+
+	@@map("super_admin_user")
+}
+
+// SA §11.9 #1：角色做成可分配的权限组，不写死人名
+model PermissionGroup {
+	id          String                      @id @default(uuid()) @db.Uuid
+	// key = shared 的 SuperAdminPermissionGroup；组 → 权限的映射只在 shared（SUPER_ADMIN_GROUP_PERMISSIONS），这里不重复存。
+	key         String                      @unique
+	name        String
+	createdAt   DateTime                    @default(now())
+	memberships SuperAdminGroupMembership[]
+
+	@@map("permission_group")
+}
+
+model SuperAdminGroupMembership {
+	userId    String          @db.Uuid
+	groupId   String          @db.Uuid
+	grantedAt DateTime        @default(now())
+	grantedBy String?         @db.Uuid
+	user      SuperAdminUser  @relation(fields: [userId], references: [id])
+	group     PermissionGroup @relation(fields: [groupId], references: [id])
+
+	@@id([userId, groupId])
+	@@map("super_admin_group_membership")
+}
+
+// 登录会话（两个 audience 共用）。refresh token 只存 SHA-256 哈希；
+// 轮换后旧 token 再次出现 = 被盗用，撤销同一 familyId 的全部会话。
+model Session {
+	id               String       @id @default(uuid()) @db.Uuid
+	audience         AuthAudience
+	subjectId        String       @db.Uuid
+	providerId       String?      @db.Uuid
+	familyId         String       @db.Uuid
+	// Demo 会话：Portal 体验者 / Super Admin Demo console。providerId 指向本会话克隆的虚构 Provider。
+	isDemo           Boolean      @default(false)
+	refreshTokenHash String       @unique
+	createdAt        DateTime     @default(now())
+	lastUsedAt       DateTime     @default(now())
+	expiresAt        DateTime
+	rotatedAt        DateTime?
+	revokedAt        DateTime?
+
+	@@index([providerId, createdAt])
+	@@index([subjectId, audience])
+	@@index([familyId])
+	@@map("session")
+}
+
+model ApprovalRequest {
+	id           String         @id @default(uuid()) @db.Uuid
+	providerId   String?        @db.Uuid
+	kind         ApprovalKind
+	targetType   String
+	targetId     String
+	// 批准后要执行的变更（按 kind 由 shared / API 的 schema 校验）；不含健康信息。
+	payload      Json
+	summary      String
+	reason       String
+	status       ApprovalStatus @default(Pending)
+	requestedBy  String         @db.Uuid
+	decidedBy    String?        @db.Uuid
+	decidedAt    DateTime?
+	decisionNote String?
+	createdAt    DateTime       @default(now())
+
+	@@index([providerId, status])
+	@@index([status, createdAt])
+	@@map("approval_request")
+}
+
+// SA §4-H：州规则包。id 即规则包 ID，例如 "NSW-2026.10-1"（每个版本一行，已发布版本不可修改）。
+model StateRulePack {
+	id          String          @id
+	state       AustralianState
+	status      ContentStatus   @default(Draft)
+	entries     Json
+	sources     Json
+	draftedBy   String          @db.Uuid
+	approvedBy  String?         @db.Uuid
+	publishedAt DateTime?
+	createdAt   DateTime        @default(now())
+
+	@@index([state, status])
+	@@map("state_rule_pack")
+}
+
+// SA §4-I：全局文书模板库（只存引用和元数据，不存模板正文；不收第三方原文）
+model DocumentTemplateVersion {
+	id               String        @id @default(uuid()) @db.Uuid
+	templateName     String
+	title            String
+	version          String
+	sourceCommit     String?
+	defaultTier      Int
+	humanOnlyFields  String[]
+	applicableStates Json
+	status           ContentStatus @default(Draft)
+	draftedBy        String        @db.Uuid
+	approvedBy       String?       @db.Uuid
+	publishedAt      DateTime?
+	createdAt        DateTime      @default(now())
+
+	@@unique([templateName, version])
+	@@index([status])
+	@@map("document_template_version")
+}
+
+// 平台级的单值设置，例如 rp_consent_cth_transition（只能人工切换并写审计，不按日期自动切换）
+model PlatformSetting {
+	key       String   @id
+	value     Json
+	reason    String
+	changedBy String   @db.Uuid
+	changedAt DateTime @default(now())
+
+	@@map("platform_setting")
+}
+
+model FeatureFlag {
+	key             String                @id
+	category        FeatureFlagCategory
+	description     String
+	legalOpinionRef String?
+	updatedBy       String                @db.Uuid
+	updatedAt       DateTime              @updatedAt
+	overrides       FeatureFlagOverride[]
+
+	@@map("feature_flag")
+}
+
+// 功能开关默认关；每条覆盖都有原因和操作人
+model FeatureFlagOverride {
+	id         String           @id @default(uuid()) @db.Uuid
+	flagKey    String
+	scope      FeatureFlagScope
+	state      AustralianState?
+	providerId String?          @db.Uuid
+	facilityId String?          @db.Uuid
+	isEnabled  Boolean
+	reason     String
+	changedBy  String           @db.Uuid
+	changedAt  DateTime         @default(now())
+	flag       FeatureFlag      @relation(fields: [flagKey], references: [key])
+
+	@@unique([flagKey, scope, state, providerId, facilityId])
+	@@index([providerId, flagKey])
+	@@map("feature_flag_override")
+}
+
+// ───────────────────────────── 租户：Provider 层级 ─────────────────────────────
+
+model Provider {
+	id                      String         @id @default(uuid()) @db.Uuid
+	slug                    String         @unique
+	// 名称只在真实（非 Demo）Provider 之间唯一：每位 Demo 体验者都有一份同名的虚构 Wattle Grove 克隆（prisma/rls.sql 部分唯一索引）。
+	legalName               String
+	tradingName             String?
+	abn                     String
+	status                  ProviderStatus @default(Draft)
+	isDemo                  Boolean        @default(false)
+	suspensionReason        String?
+	terminationNoticeOn     DateTime?      @db.Date
+	dataReturnConfirmedAt   DateTime?
+	alwaysDenyContentAccess Boolean        @default(false)
+	createdAt               DateTime       @default(now())
+	updatedAt               DateTime       @updatedAt
+	regions                 Region[]
+	facilities              Facility[]
+	plan                    Plan?
+
+	@@index([isDemo, status])
+	@@map("provider")
+}
+
+model Region {
+	id         String     @id @default(uuid()) @db.Uuid
+	providerId String     @db.Uuid
+	name       String
+	createdAt  DateTime   @default(now())
+	provider   Provider   @relation(fields: [providerId], references: [id])
+	facilities Facility[]
+
+	@@unique([providerId, name])
+	@@index([providerId])
+	@@map("region")
+}
+
+model Facility {
+	id                        String          @id @default(uuid()) @db.Uuid
+	providerId                String          @db.Uuid
+	regionId                  String?         @db.Uuid
+	name                      String
+	addressLine1              String
+	addressLine2              String?
+	suburb                    String
+	state                     AustralianState
+	postcode                  String
+	isStateGovernmentOperated Boolean         @default(false)
+	status                    FacilityStatus  @default(Onboarding)
+	rulePackId                String?
+	operationalBeds           Int             @default(0)
+	createdAt                 DateTime        @default(now())
+	updatedAt                 DateTime        @updatedAt
+	provider                  Provider        @relation(fields: [providerId], references: [id])
+	region                    Region?         @relation(fields: [regionId], references: [id])
+	units                     Unit[]
+
+	@@unique([providerId, name])
+	@@index([providerId])
+	@@index([providerId, state])
+	@@map("facility")
+}
+
+model Unit {
+	id          String   @id @default(uuid()) @db.Uuid
+	providerId  String   @db.Uuid
+	facilityId  String   @db.Uuid
+	name        String
+	description String?
+	isActive    Boolean  @default(true)
+	createdAt   DateTime @default(now())
+	facility    Facility @relation(fields: [facilityId], references: [id])
+
+	@@unique([facilityId, name])
+	@@index([providerId, facilityId])
+	@@map("unit")
+}
+
+// SA §4-L：只记录 + 限额生效，不做支付。limits = PlanLimit[]（shared 校验）
+model Plan {
+	id            String        @id @default(uuid()) @db.Uuid
+	providerId    String        @unique @db.Uuid
+	name          String
+	limits        Json
+	contractStart DateTime?     @db.Date
+	contractEnd   DateTime?     @db.Date
+	billingStatus BillingStatus @default(NotInvoiced)
+	accountingRef String?
+	updatedBy     String        @db.Uuid
+	updatedAt     DateTime      @updatedAt
+	provider      Provider      @relation(fields: [providerId], references: [id])
+
+	@@index([providerId])
+	@@map("plan")
+}
+
+// SA §4-F：只记录状态和外部引用，不存原件
+model ComplianceStatus {
+	id                    String                 @id @default(uuid()) @db.Uuid
+	providerId            String                 @db.Uuid
+	documentType          ComplianceDocumentType
+	status                ComplianceStatusValue  @default(NotStarted)
+	effectiveOn           DateTime?              @db.Date
+	expiresOn             DateTime?              @db.Date
+	carekindOwnerId       String?                @db.Uuid
+	providerOwnerName     String?
+	providerOwnerPosition String?
+	externalRef           String?
+	hasNonStandardTerms   Boolean                @default(false)
+	nonStandardApprovedOn DateTime?              @db.Date
+	notes                 String?
+	updatedBy             String                 @db.Uuid
+	updatedAt             DateTime               @updatedAt
+
+	@@unique([providerId, documentType])
+	@@index([providerId])
+	@@map("compliance_status")
+}
+
+// 上线清单 ★11：泄露通报登记（只是登记和提醒）
+model BreachNotificationRegistration {
+	providerId              String       @id @db.Uuid
+	contactName             String
+	contactPosition         String
+	regime                  BreachRegime
+	carekindCommitmentHours Int          @default(24)
+	updatedBy               String       @db.Uuid
+	updatedAt               DateTime     @updatedAt
+
+	@@map("breach_notification_registration")
+}
+
+// SA §4-E：每家 Facility 一份 19 项上线清单
+model GoLiveChecklistItem {
+	id           String           @id @default(uuid()) @db.Uuid
+	providerId   String           @db.Uuid
+	facilityId   String           @db.Uuid
+	itemNumber   Int
+	isGoLiveGate Boolean
+	isComplete   Boolean          @default(false)
+	completedAt  DateTime?
+	completedBy  String?          @db.Uuid
+	source       GoLiveItemSource
+
+	@@unique([facilityId, itemNumber])
+	@@index([providerId, facilityId])
+	@@map("go_live_checklist_item")
+}
+
+// ───────────────────────────── 租户：员工 ─────────────────────────────
+
+// PP §4.4：只存使用 careKind 必需的字段；不存出生日期、住址、police check、薪资、绩效
+model StaffMember {
+	id                     String                    @id @default(uuid()) @db.Uuid
+	providerId             String                    @db.Uuid
+	fullName               String
+	preferredName          String?
+	loginEmail             String
+	passwordHash           String?
+	nurseAppRole           NurseAppRole
+	registrationType       RegistrationType          @default(None)
+	ahpraNumber            String?
+	registrationAttestedBy String?                   @db.Uuid
+	registrationAttestedAt DateTime?
+	preferredLanguage      String?
+	status                 StaffStatus               @default(Invited)
+	failedLoginCount       Int                       @default(0)
+	lockedUntil            DateTime?
+	lastLoginAt            DateTime?
+	invitedAt              DateTime                  @default(now())
+	activatedAt            DateTime?
+	deactivatedAt          DateTime?
+	deactivationReason     String?
+	updatedAt              DateTime                  @updatedAt
+	assignments            StaffFacilityAssignment[]
+	portalRoles            PortalRoleAssignment[]
+	onboardingSteps        StaffOnboardingStep[]
+
+	@@unique([providerId, loginEmail])
+	@@index([providerId, status])
+	@@map("staff_member")
+}
+
+// 一名员工可分配到 1..n 家 Facility；unitIds 为空 = 该院所有 Unit
+model StaffFacilityAssignment {
+	id         String      @id @default(uuid()) @db.Uuid
+	providerId String      @db.Uuid
+	staffId    String      @db.Uuid
+	facilityId String      @db.Uuid
+	unitIds    String[]    @db.Uuid
+	createdAt  DateTime    @default(now())
+	staff      StaffMember @relation(fields: [staffId], references: [id])
+
+	@@unique([staffId, facilityId])
+	@@index([providerId, facilityId])
+	@@map("staff_facility_assignment")
+}
+
+// 管理端角色 + 范围：regionId 和 facilityId 都为空 = 整个 Provider；否则一行一个 Region 或 Facility
+model PortalRoleAssignment {
+	id         String      @id @default(uuid()) @db.Uuid
+	providerId String      @db.Uuid
+	staffId    String      @db.Uuid
+	role       PortalRole
+	regionId   String?     @db.Uuid
+	facilityId String?     @db.Uuid
+	grantedBy  String      @db.Uuid
+	approvedBy String?     @db.Uuid
+	grantedAt  DateTime    @default(now())
+	staff      StaffMember @relation(fields: [staffId], references: [id])
+
+	@@index([providerId, staffId])
+	@@index([providerId, role])
+	@@map("portal_role_assignment")
+}
+
+// 给非临床人员（例如 Owner）授予临床角色：需要第二人批准（Provider Portal PRD §4.2 规则 1，HAZ-P-PP-03）
+model ClinicalRoleGrantRequest {
+	id          String         @id @default(uuid()) @db.Uuid
+	providerId  String         @db.Uuid
+	staffId     String         @db.Uuid
+	role        PortalRole
+	scope       Json
+	reason      String
+	status      ApprovalStatus @default(Pending)
+	requestedBy String         @db.Uuid
+	requestedAt DateTime       @default(now())
+	decidedBy   String?        @db.Uuid
+	decidedAt   DateTime?
+
+	@@index([providerId, status])
+	@@map("clinical_role_grant_request")
+}
+
+// 员工上线步骤（流程第 7 项）：三项默认步骤 + 机构自加步骤
+model StaffOnboardingStep {
+	id          String      @id @default(uuid()) @db.Uuid
+	providerId  String      @db.Uuid
+	staffId     String      @db.Uuid
+	stepId      String
+	completedAt DateTime?
+	completedBy String?     @db.Uuid
+	staff       StaffMember @relation(fields: [staffId], references: [id])
+
+	@@unique([staffId, stepId])
+	@@index([providerId, staffId])
+	@@map("staff_onboarding_step")
+}
+
+// 邀请（首个 Owner 和员工）：只存 token 哈希，72 小时过期
+model Invitation {
+	id         String    @id @default(uuid()) @db.Uuid
+	providerId String    @db.Uuid
+	staffId    String    @db.Uuid
+	tokenHash  String    @unique
+	expiresAt  DateTime
+	acceptedAt DateTime?
+	createdBy  String    @db.Uuid
+	createdAt  DateTime  @default(now())
+
+	@@index([providerId, staffId])
+	@@map("invitation")
+}
+
+// ───────────────────────────── 租户：住户（Super Admin 不可见） ─────────────────────────────
+
+model Resident {
+	id                        String                 @id @default(uuid()) @db.Uuid
+	providerId                String                 @db.Uuid
+	facilityId                String                 @db.Uuid
+	unitId                    String?                @db.Uuid
+	room                      String?
+	legalName                 String
+	preferredName             String?
+	dateOfBirth               DateTime               @db.Date
+	facilityResidentId        String
+	cmsId                     String?
+	status                    ResidentStatus         @default(PreAdmission)
+	startDay                  DateTime?              @db.Date
+	departedOn                DateTime?              @db.Date
+	aiDocumentationConsent    AiDocumentationConsent @default(Pending)
+	isRecordingOptedOut       Boolean                @default(false)
+	consentSource             Json?
+	consentRecordedOn         DateTime?              @db.Date
+	consentRecordedBy         String?                @db.Uuid
+	hasSimilarNameFlag        Boolean                @default(false)
+	roomChangedAt             DateTime?
+	createdByImportBatchId    String?                @db.Uuid
+	createdAt                 DateTime               @default(now())
+	updatedAt                 DateTime               @updatedAt
+	locationHistory           ResidentLocationEvent[]
+	consentEvents             ResidentConsentEvent[]
+	contacts                  ResidentContact[]
+
+	@@unique([providerId, facilityResidentId])
+	@@index([providerId, facilityId, status])
+	@@map("resident")
+}
+
+model ResidentLocationEvent {
+	id            String            @id @default(uuid()) @db.Uuid
+	providerId    String            @db.Uuid
+	residentId    String            @db.Uuid
+	facilityId    String            @db.Uuid
+	unitId        String?           @db.Uuid
+	room          String?
+	kind          LocationEventKind
+	reason        RoomChangeReason?
+	effectiveFrom DateTime
+	changedBy     String            @db.Uuid
+	resident      Resident          @relation(fields: [residentId], references: [id])
+
+	@@index([providerId, residentId])
+	@@index([providerId, facilityId, room])
+	@@map("resident_location_event")
+}
+
+// 同意的每次变化都保留（PP §4.5：退出即时生效，历史保留）
+model ResidentConsentEvent {
+	id                  String                 @id @default(uuid()) @db.Uuid
+	providerId          String                 @db.Uuid
+	residentId          String                 @db.Uuid
+	aiDocumentation     AiDocumentationConsent
+	isRecordingOptedOut Boolean
+	source              Json
+	recordedOn          DateTime               @db.Date
+	recordedBy          String                 @db.Uuid
+	createdAt           DateTime               @default(now())
+	resident            Resident               @relation(fields: [residentId], references: [id])
+
+	@@index([providerId, residentId])
+	@@map("resident_consent_event")
+}
+
+// 联系人：只存姓名、关系、角色类型；不推导谁是 person responsible
+model ResidentContact {
+	id           String          @id @default(uuid()) @db.Uuid
+	providerId   String          @db.Uuid
+	residentId   String          @db.Uuid
+	name         String
+	relationship String
+	roleType     ContactRoleType
+	createdAt    DateTime        @default(now())
+	resident     Resident        @relation(fields: [residentId], references: [id])
+
+	@@index([providerId, residentId])
+	@@map("resident_contact")
+}
+
+// 同公司转院：住户 ID 不变；按住户 ID，永远不按房间
+model ResidentTransfer {
+	id             String                 @id @default(uuid()) @db.Uuid
+	providerId     String                 @db.Uuid
+	residentId     String                 @db.Uuid
+	fromFacilityId String                 @db.Uuid
+	toFacilityId   String                 @db.Uuid
+	toUnitId       String?                @db.Uuid
+	toRoom         String?
+	effectiveAt    DateTime
+	reasonCategory TransferReasonCategory
+	status         TransferStatus
+	blockers       Json
+	initiatedBy    String                 @db.Uuid
+	acceptedBy     String?                @db.Uuid
+	acceptedAt     DateTime?
+	cancelReason   String?
+	createdAt      DateTime               @default(now())
+
+	@@index([providerId, residentId])
+	@@index([providerId, toFacilityId, status])
+	@@map("resident_transfer")
+}
+
+// 名单 CSV 分步导入：原文件不落库，只存校验和与逐行结果
+model RosterImportBatch {
+	id                         String            @id @default(uuid()) @db.Uuid
+	providerId                 String            @db.Uuid
+	facilityId                 String            @db.Uuid
+	fileName                   String
+	fileChecksum               String
+	status                     RosterBatchStatus
+	rowCount                   Int
+	requiresSecondConfirmation Boolean           @default(false)
+	uploadedBy                 String            @db.Uuid
+	confirmedBy                String?           @db.Uuid
+	createdAt                  DateTime          @default(now())
+	appliedAt                  DateTime?
+	revertedAt                 DateTime?
+	rows                       RosterImportRow[]
+
+	@@index([providerId, facilityId, createdAt])
+	@@map("roster_import_batch")
+}
+
+model RosterImportRow {
+	id                String            @id @default(uuid()) @db.Uuid
+	providerId        String            @db.Uuid
+	batchId           String            @db.Uuid
+	position          Int
+	rowNumber         Int?
+	status            RosterRowStatus
+	parsed            Json?
+	matchedResidentId String?           @db.Uuid
+	issues            String[]
+	decision          RosterRowDecision @default(Undecided)
+	decisionReason    String?
+	decidedBy         String?           @db.Uuid
+	decidedAt         DateTime?
+	batch             RosterImportBatch @relation(fields: [batchId], references: [id])
+
+	@@unique([batchId, position])
+	@@index([providerId, batchId])
+	@@map("roster_import_row")
+}
+
+// ───────────────────────────── 配置版本（Layer 1–3） ─────────────────────────────
+
+// layer = Platform 时 providerId 为空（careKind 全局默认 + 下限 = 流程模板）；Provider / Facility 时必填。
+// 已保存的版本不可修改；回滚 = 用旧值生成新版本（restoredFromVersionId）。
+model ConfigVersion {
+	id                    String              @id @default(uuid()) @db.Uuid
+	providerId            String?             @db.Uuid
+	facilityId            String?             @db.Uuid
+	layer                 ConfigLayer
+	item                  WorkflowItem
+	versionNumber         Int
+	config                Json
+	status                ConfigVersionStatus
+	changedBy             String              @db.Uuid
+	reason                String
+	approvedBy            String?             @db.Uuid
+	approvedAt            DateTime?
+	effectiveMode         EffectiveMode
+	effectiveFrom         DateTime?
+	restoredFromVersionId String?             @db.Uuid
+	createdAt             DateTime            @default(now())
+
+	@@unique([layer, providerId, facilityId, item, versionNumber])
+	@@index([providerId, facilityId, item, status])
+	@@map("config_version")
+}
+
+// ───────────────────────────── 支持访问 ─────────────────────────────
+
+model SupportAccessRequest {
+	id                        String              @id @default(uuid()) @db.Uuid
+	providerId                String              @db.Uuid
+	ticketRef                 String
+	reason                    String
+	scope                     SupportAccessScope
+	target                    Json
+	includesHealthInformation Boolean
+	durationMinutes           Int
+	status                    SupportAccessStatus @default(Pending)
+	requestedBy               String              @db.Uuid
+	requestedAt               DateTime            @default(now())
+	decidedBy                 String?             @db.Uuid
+	decidedAt                 DateTime?
+	decisionNote              String?
+	startedAt                 DateTime?
+	expiresAt                 DateTime?
+	endedAt                   DateTime?
+	revokedBy                 String?             @db.Uuid
+	accessSummary             Json?
+	isPreGenerated            Boolean             @default(false)
+
+	@@index([providerId, status])
+	@@index([requestedBy, status])
+	@@map("support_access_request")
+}
+
+// ───────────────────────────── 审计（只追加） ─────────────────────────────
+
+// "谁、何时、做了什么、对象 ID"；context 只放 ID、代码、数字、布尔值。
+// providerId 为空 = careKind 平台层事件（只有 Super Admin 可读）。
+// hash = SHA-256(previousHash + 规范化事件)，同一 Provider（或平台层）内形成哈希链。
+model AuditEvent {
+	id           String         @id @default(uuid()) @db.Uuid
+	seq          BigInt         @unique @default(autoincrement())
+	providerId   String?        @db.Uuid
+	facilityId   String?        @db.Uuid
+	actorType    AuditActorType
+	actorId      String?        @db.Uuid
+	action       String
+	targetType   String
+	targetId     String
+	outcome      AuditOutcome
+	context      Json
+	occurredAt   DateTime       @default(now())
+	previousHash String?
+	hash         String
+
+	@@index([providerId, seq])
+	@@index([providerId, occurredAt])
+	@@index([providerId, facilityId, occurredAt])
+	@@map("audit_event")
+}

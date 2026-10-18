@@ -20,15 +20,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 git config core.hooksPath .githooks          # 每个 clone 执行一次
 scripts/check-file-length.sh --all           # 检查全部代码文件行数
 scripts/check-context-docs.sh                # 检查各层 CLAUDE.md / README.md
+npm test                                     # 单元测试（domain）；npm run test:integration 需要数据库
+npm run db:up && npm run db:migrate && npm run db:rls && npm run db:seed && npm run start:dev   # 本地启动（见 README）
 ```
-技术栈确定前没有 build、lint、test 命令；确定后补在这里。
+以上命令写在这里供开发者使用；**写这些代码的 AI 会话只运行过个别单元测试文件**，没有运行 migrate / seed / start / 全量检查。
 
 ## 仓库说明
 > 层级：代码仓库 · 在 meta repo 中的路径：`06-app-development/app/` · 上级上下文（在 meta repo 中时）：[`../CLAUDE.md`](../CLAUDE.md)
 > 本文件给 AI 看；给人看的说明在同目录的 `README.md`。
 
 ## 这里是什么
-careKind App 的源代码（后端 + 护士端 App）。技术栈还没有确定，以 `../engineering/adr/` 为准；在 ADR 确定之前，本仓库只有架构骨架和各功能模块的文档，**没有可运行的代码**。
+careKind API（`carekind-api`）。技术栈按 ADR-0006（Proposed）：NestJS 11 + Fastify、Postgres 16 + Prisma、RLS、argon2id + cookie JWT，校验与路由契约来自 `@carekind/shared`。
+**第一阶段只做管理端，目前只完成 Super Admin**；其余 shared 契约端点返回 501（`src/interfaces/not-implemented.ts`）。护士端 domain 模块只有文档，保留不改。
 
 ## 在这里通常要做的事
 - 实现 docs/PRD.md 中的功能
@@ -44,7 +47,11 @@ careKind App 的源代码（后端 + 护士端 App）。技术栈还没有确定
 - 所有数据和 LLM 推理在澳洲境内（ADR-0001）
 
 ## 关键文件
-- src/domain/<feature>/ —— 10 个功能模块（见下表）
+- prisma/schema.prisma、prisma/rls.sql、prisma/seed.ts
+- src/interfaces/endpoint.ts（契约 → 路由 + 校验）、auth.guard.ts（默认拒绝）
+- src/application/super-admin-*.service.ts、audit.service.ts（所有写操作写只追加审计）
+- src/domain/ 管理端模块：tenancy、approvals、support-access、staff-admin、resident-admin、roster-import、config-policy、access-control、audit、dashboard-metrics
+- src/domain/<feature>/ —— 护士端 10 个功能模块文档（见下表，第二阶段）
 - src/application/
 - src/adapters/
 - src/interfaces/
@@ -52,7 +59,9 @@ careKind App 的源代码（后端 + 护士端 App）。技术栈还没有确定
 - ../engineering/any-whitelist.md
 
 ## 不要做
-- 不要在 ADR 确定前擅自选定技术栈或初始化框架
+- 不要在 controller 里写业务规则；不要绕过全局 guard（没有 @Endpoint 契约的路由一律拒绝）
+- 不要在 shared 已有的规则（policy）之外再写一份同样的规则
+- API 运行时连接必须用 carekind_app 角色（受 RLS 约束），不要用表的 owner 连接运行 API
 - 不要实现 TGA 红灯功能
 - 不要在 domain 层直接调用供应商 SDK
 

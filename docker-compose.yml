@@ -1,0 +1,18 @@
+# 只给开发者本机使用的 Postgres 16（ADR-0006）。AI 会话不启动它。
+# 宿主端口用 5433（本机 5432 常被其他 Postgres 占用）。
+# 账号密码从 .env 读取（见 .env.example），不要在这里写真实值。
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-carekind_dev}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - carekind-pg:/var/lib/postgresql/data
+
+volumes:
+  carekind-pg:
